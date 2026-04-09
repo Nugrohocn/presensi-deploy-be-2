@@ -1,4 +1,8 @@
+FROM composer:latest AS composer
 FROM dunglas/frankenphp:php8.2-bookworm
+
+# Copy composer binary dari official composer image
+COPY --from=composer /usr/bin/composer /usr/bin/composer
 
 RUN apt-get update && apt-get install -y \
     libzip-dev \
