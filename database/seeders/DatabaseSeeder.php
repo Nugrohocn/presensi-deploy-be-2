@@ -30,6 +30,6 @@ class DatabaseSeeder extends Seeder
         $this->call(DiklatCategorySeeder::class);
         $this->call(DiklatSettingSeeder::class);
         $this->call(AnnouncementCategorySeeder::class);
-        $this->call(AnnouncementSeeder::class);
+        // $this->call(AnnouncementSeeder::class);
     }
 }
