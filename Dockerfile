@@ -1,6 +1,6 @@
 FROM dunglas/frankenphp:php8.2
 
-# 1. Install ekstensi PHP yang dibutuhkan (Sudah benar)
+# 1. Install ekstensi PHP yang dibutuhkan
 RUN install-php-extensions \
     gd \
     pdo_pgsql \
@@ -10,16 +10,24 @@ RUN install-php-extensions \
     bcmath \
     zip
 
-# 2. TAMBAHKAN BARIS INI untuk mengambil binary composer
+# 2. Ambil binary composer terbaru
 COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
 
+# 3. Set Working Directory
 WORKDIR /app
 
+# 4. Copy seluruh file project ke dalam container [cite: 5]
 COPY . .
 
-# 3. Sekarang perintah ini akan berjalan sukses
-# RUN composer install --no-dev --optimize-autoloader
-# Hapus flag --no-dev
-RUN composer install --optimize-autoloader
+# 5. Install dependencies Laravel [cite: 5]
+RUN composer install --optimize-autoloader --no-dev
 
-CMD ["php", "artisan", "serve", "--host=0.0.0.0", "--port=8000"]
+# 6. Set izin (permissions) folder storage dan cache agar Laravel bisa menulis log/file
+RUN chown -R www-data:www-data /app/storage /app/bootstrap/cache
+
+# 7. Konfigurasi Port dan Jalankan Server
+# Kita menggunakan variabel $PORT yang disediakan otomatis oleh Railway.
+# Perintah ini akan menjalankan migrasi, seeding, lalu menyalakan server.
+CMD php artisan migrate --force && \
+    php artisan db:seed --force && \
+    frankenphp php-server --listen :$PORT
