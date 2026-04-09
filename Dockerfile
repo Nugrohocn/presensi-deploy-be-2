@@ -18,6 +18,8 @@ WORKDIR /app
 COPY . .
 
 # 3. Sekarang perintah ini akan berjalan sukses
-RUN composer install --no-dev --optimize-autoloader
+# RUN composer install --no-dev --optimize-autoloader
+# Hapus flag --no-dev
+RUN composer install --optimize-autoloader
 
 CMD ["php", "artisan", "serve", "--host=0.0.0.0", "--port=8000"]
