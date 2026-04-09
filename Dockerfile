@@ -4,7 +4,9 @@ RUN apt-get update && apt-get install -y \
     libzip-dev \
     libpng-dev \
     libxml2-dev \
-    && docker-php-ext-install zip gd xml mbstring pdo_pgsql \
+    libpq-dev \
+    libonig-dev \
+    && docker-php-ext-install zip gd pdo_pgsql \
     && apt-get clean
 
 COPY . /app
