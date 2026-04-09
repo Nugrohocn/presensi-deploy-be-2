@@ -1,5 +1,5 @@
 {
-    "php": {
-        "extensions": ["gd", "zip", "xml", "mbstring"]
+    "build": {
+        "phpExtensions": ["gd", "zip", "xml", "mbstring"]
     }
 }
