@@ -369,13 +369,15 @@ class ShiftSubmissionController extends ApiController
                     $nextStepApprover = $nextStepData ? $nextStepData->approver : null;
 
                     if ($nextStepApprover) {
+                        $submission->load('user.employee');
+                        $photoUrl = $submission->user->employee->photo ? Storage::url($submission->user->employee->photo) : null;
                         $title = 'Butuh Persetujuan: Tukar Shift';
                         $message = "{$user->name} telah menyetujui tahap sebelumnya. Mohon tinjau pengajuan dari {$submission->user->name}.";
 
                         // Mengirim notifikasi ke Approver asli DAN delegasinya (jika ada)
                         \App\Services\ApprovalDelegationService::sendParallelNotification(
                             $nextStepApprover,
-                            new SubmissionNotification($title, $message, $notifLink, 'change_shift')
+                            new SubmissionNotification($title, $message, $notifLink, 'change_shift', $photoUrl)
                         );
                     }
 

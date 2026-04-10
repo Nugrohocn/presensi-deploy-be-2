@@ -325,13 +325,15 @@ class LeaveSubmissionController extends ApiController
                     $nextStepApprover = $nextStepData ? $nextStepData->approver : null;
 
                     if ($nextStepApprover) {
+                        $leave->load('user.employee');
+                        $photoUrl = $leave->user->employee->photo ? Storage::url($leave->user->employee->photo) : null;
                         $title = 'Butuh Persetujuan: Cuti';
                         $message = "{$user->name} telah menyetujui tahap sebelumnya. Mohon tinjau pengajuan dari {$leave->user->name}.";
 
                         // Fitur Notifikasi Paralel Anda
                         \App\Services\ApprovalDelegationService::sendParallelNotification(
                             $nextStepApprover,
-                            new SubmissionNotification($title, $message, $notifLink, 'leave')
+                            new SubmissionNotification($title, $message, $notifLink, 'leave', $photoUrl)
                         );
                     }
 

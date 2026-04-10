@@ -510,6 +510,9 @@ class ApprovalController extends ApiController
                     $data->current_step += 1;
                     $data->save();
 
+                    $data->load('user.employee');
+                    $photoUrl = $data->user->employee->photo ? Storage::url($data->user->employee->photo) : null;
+
                     $nextStepData = $data->approvalSteps()->where('step', $data->current_step)->first();
                     $nextApprover = $nextStepData ? $nextStepData->approver : null;
 
@@ -520,7 +523,8 @@ class ApprovalController extends ApiController
                                 'Butuh Persetujuan: Absensi',
                                 "{$user->name} telah menyetujui tahap sebelumnya. Mohon tinjau absensi {$data->user->name}.",
                                 $notifLink,
-                                'attendance'
+                                'attendance',
+                                $photoUrl
                             )
                         );
                     }
@@ -549,7 +553,7 @@ class ApprovalController extends ApiController
         $isSuperAdmin = in_array($userRole, ['superadmin', 'director']);
 
         // Pemetaan Tipe untuk Judul & Pesan Notifikasi (Bahasa Indonesia)
-        $typeLabel = match($request->type) {
+        $typeLabel = match ($request->type) {
             'leave'           => 'Cuti',
             'attendance'      => 'Absensi (Manual)',
             'live_attendance' => 'Absensi (Live)',
@@ -570,7 +574,7 @@ class ApprovalController extends ApiController
         DB::beginTransaction();
         try {
             $processedCount = 0;
-            
+
             // Tentukan status "pending" yang benar (Live pakai konstanta integer 1)
             $statusPending = ($request->type === 'live_attendance') ? \App\Models\Attendance::STATUS_PENDING : 'pending';
 
@@ -599,7 +603,7 @@ class ApprovalController extends ApiController
                 // --- A. LOGIKA TOLAK (REJECT) ---
                 if ($request->action === 'reject') {
                     $note = $isSuperAdmin ? 'Force rejected by Superadmin (Bulk)' : 'Rejected via Bulk Action';
-                    
+
                     $requestRecord->approvalSteps()->where('status', 'pending')->update([
                         'status'       => 'rejected',
                         'processed_by' => $user->id,
@@ -609,7 +613,7 @@ class ApprovalController extends ApiController
 
                     // Tentukan status reject (Live = 3, Manual/Lainnya = 'rejected')
                     $rejectStatus = ($request->type === 'live_attendance') ? \App\Models\Attendance::STATUS_REJECTED : 'rejected';
-                    
+
                     $requestRecord->update([
                         'status'         => $rejectStatus,
                         'rejection_note' => "Ditolak via Bulk Action oleh {$user->name}"
@@ -669,11 +673,11 @@ class ApprovalController extends ApiController
                     } else {
                         // Lanjut ke tahap berikutnya
                         $requestRecord->increment('current_step');
-                        
+
                         $nextStep = $requestRecord->approvalSteps()->where('step', $requestRecord->current_step)->first();
                         if ($nextStep && $nextStep->approver) {
                             $photoUrl = $requestRecord->user->employee?->photo ? Storage::url($requestRecord->user->employee->photo) : null;
-                            
+
                             \App\Services\ApprovalDelegationService::sendParallelNotification(
                                 $nextStep->approver,
                                 new SubmissionNotification(
@@ -701,9 +705,9 @@ class ApprovalController extends ApiController
     /**
      * Helper untuk link detail berdasarkan tipe
      */
-    private function getDetailLink($type, $id) 
+    private function getDetailLink($type, $id)
     {
-        return match($type) {
+        return match ($type) {
             'leave'        => "/leave/approvals/detail/{$id}",
             'attendance'   => "/attendance/approvals/detail/{$id}?source_type=request",
             'overtime'     => "/overtime/approvals/detail/{$id}",
@@ -715,7 +719,7 @@ class ApprovalController extends ApiController
     /**
      * Helper untuk logika sinkronisasi data final
      */
-    private function handleFinalSync($type, $record, $adminId) 
+    private function handleFinalSync($type, $record, $adminId)
     {
         if ($type === 'leave') {
             $record->load('leave');
@@ -738,16 +742,16 @@ class ApprovalController extends ApiController
         }
     }
 
-    private function translateType($type) 
+    private function translateType($type)
     {
-        return match($type) {
+        return match ($type) {
             'leave'        => 'Cuti',
             'attendance'   => 'Absensi',
             'overtime'     => 'Lembur',
             'change_shift' => 'Tukar Shift',
             default        => ucfirst($type)
         };
-    }   
+    }
 
     private function syncRequestToAttendance($submission)
     {

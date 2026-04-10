@@ -335,13 +335,15 @@ class OvertimeSubmissionController extends ApiController
                     $nextStepApprover = $nextStepData ? $nextStepData->approver : null;
 
                     if ($nextStepApprover) {
+                        $overtime->load('user.employee');
+                        $photoUrl = $overtime->user->employee->photo ? Storage::url($overtime->user->employee->photo) : null;
                         $title = 'Butuh Persetujuan: Lembur';
                         $message = "{$user->name} telah menyetujui tahap sebelumnya. Mohon tinjau lembur dari {$overtime->user->name}.";
 
                         // Mengirim notifikasi ke Approver asli DAN delegasinya (Fitur Anda)
                         \App\Services\ApprovalDelegationService::sendParallelNotification(
                             $nextStepApprover,
-                            new SubmissionNotification($title, $message, $notifLink, 'overtime')
+                            new SubmissionNotification($title, $message, $notifLink, 'overtime', $photoUrl)
                         );
                     }
 
