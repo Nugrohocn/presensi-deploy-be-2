@@ -422,8 +422,8 @@ class AttendanceController extends ApiController
                             $link    = "/attendance/approvals/detail/{$attendance->id}?source_type=attendance";
 
                             \App\Services\ApprovalDelegationService::sendParallelNotification(
-                            $firstApprover, 
-                            new SubmissionNotification($title, $message, $link, 'attendance', $photoUrl)
+                                $firstApprover,
+                                new SubmissionNotification($title, $message, $link, 'attendance', $photoUrl)
                             );
                         }
                     }
@@ -487,7 +487,7 @@ class AttendanceController extends ApiController
 
             if ($currentStepData) {
                 $canApprove = \App\Services\ApprovalDelegationService::canPerformAction(
-                    $currentStepData->approver_id, 
+                    $currentStepData->approver_id,
                     $attendance->user_id
                 );
             }
@@ -1142,7 +1142,8 @@ class AttendanceController extends ApiController
     public function getRewardData(Request $request)
     {
         $validator = Validator::make($request->all(), [
-            'month' => 'required|integer|min:1|max:12',
+            'start_month' => 'required|integer|min:1|max:12',
+            'end_month'   => 'required|integer|min:1|max:12',
             'year'  => 'required|integer',
         ]);
 
@@ -1150,17 +1151,18 @@ class AttendanceController extends ApiController
             return $this->respondError($validator->errors()->first());
         }
 
-        $month = $request->month;
-        $year  = $request->year;
+        $startMonth = $request->start_month;
+        $endMonth   = $request->end_month;
+        $year       = $request->year;
 
-        $startDate = Carbon::createFromDate($year, $month, 1)->startOfMonth();
-        $endDate   = Carbon::createFromDate($year, $month, 1)->endOfMonth();
+        $startDate = Carbon::createFromDate($year, $startMonth, 1)->startOfMonth();
+        $endDate   = Carbon::createFromDate($year, $endMonth, 1)->endOfMonth();
 
         if ($endDate->isFuture()) {
             $endDate = Carbon::now();
         }
 
-        $daysInMonth = $startDate->diffInDays($endDate) + 1;
+        $daysInPeriod = $startDate->diffInDays($endDate) + 1;
 
         $users = User::with([
             'employee.department',
@@ -1196,9 +1198,19 @@ class AttendanceController extends ApiController
         $candidates = [];
 
         // Debugging Log Awal
-        \Log::info("=== MEMULAI REWARD DATA DEBUG ($month/$year) ===");
+        \Log::info("=== MEMULAI REWARD DATA DEBUG ($startMonth s/d $endMonth / $year) ===");
 
         foreach ($users as $user) {
+            $joinDate = ($user->employee && $user->employee->join_date) ? Carbon::parse($user->employee->join_date) : $startDate;
+
+            $relevantStartForUser = $joinDate->gt($startDate) ? $joinDate : $startDate;
+            $userPotentialDays = $relevantStartForUser->diffInDays($endDate) + 1;
+
+            // 1. Gatekeeper minimal 15 hari
+            if ($userPotentialDays < 15) {
+                continue;
+            }
+
             $userAttendances = $attendances->get($user->id) ? $attendances->get($user->id)->keyBy('date') : collect([]);
             $userSubmissions = $approvedSubmissions->get($user->id) ? $approvedSubmissions->get($user->id)->groupBy('date') : collect([]);
 
@@ -1208,72 +1220,55 @@ class AttendanceController extends ApiController
             $totalAlpha = 0;
             $totalCuti = 0;
             $totalMenitRajin = 0;
-
             $totalPelanggaranLog = 0;
             $totalPengajuanDiACC = 0;
 
-            for ($day = 1; $day <= $daysInMonth; $day++) {
-                $currentObj = Carbon::createFromDate($year, $month, $day);
+            for ($i = 0; $i < $daysInPeriod; $i++) {
+                $currentObj = $startDate->copy()->addDays($i);
                 $dateStr = $currentObj->format('Y-m-d');
+
+                if ($currentObj->lt($joinDate->startOfDay())) {
+                    continue;
+                }
 
                 $isWeekend = $currentObj->isSunday();
                 $isNatHoliday = $isNationalHolidayFunc($dateStr);
-
-                $att = $userAttendances->get($dateStr);
+                $att = $userAttendances->get($dateStr); // Mengambil data per tanggal
 
                 if ($att) {
-                    if ($att->status != \App\Models\Attendance::STATUS_LEAVE) {
+                    // Hitung Menit Rajin (Hanya jika Present)
+                    if ($att->status == \App\Models\Attendance::STATUS_PRESENT) {
+                        $totalHadir++;
+                        $checkInLog = $att->logs->where('attendance_type', 'check_in')->first();
+                        if ($checkInLog && $att->shift && $att->shift->start_time) {
+                            $jamScan = date('H:i:s', strtotime($checkInLog->time));
+                            $jamJadwal = date('H:i:s', strtotime($att->shift->start_time));
+                            $carbonScan = Carbon::createFromTimeString($jamScan);
+                            $carbonJadwal = Carbon::createFromTimeString($jamJadwal);
 
-                        $checkInLog  = $att->logs->where('attendance_type', 'check_in')->first();
-                        $checkOutLog = $att->logs->where('attendance_type', 'check_out')->first();
-
-                        // Logika Menit Pagi (Early In) dengan Debugging
-                        if ($att->status == \App\Models\Attendance::STATUS_PRESENT) {
-                            $shiftStart = $att->shift ? $att->shift->start_time : null;
-                            
-                            if ($checkInLog && $shiftStart) {
-                                $jamScan = date('H:i:s', strtotime($checkInLog->time));
-                                $jamJadwal = date('H:i:s', strtotime($shiftStart));
-
-                                $carbonScan = Carbon::createFromTimeString($jamScan);
-                                $carbonJadwal = Carbon::createFromTimeString($jamJadwal);
-
-                                if ($carbonScan->lt($carbonJadwal)) {
-                                    $diff = $carbonScan->diffInMinutes($carbonJadwal);
-                                    $totalMenitRajin += (int) $diff;
-                                    \Log::info("EARLY IN: {$user->name} | TGL: {$dateStr} | SCAN: {$jamScan} | JADWAL: {$jamJadwal} | MENIT: {$diff}");
-                                }
+                            if ($carbonScan->lt($carbonJadwal)) {
+                                $totalMenitRajin += (int) $carbonScan->diffInMinutes($carbonJadwal);
                             }
                         }
-
-                        $dayReqs = $userSubmissions->get($dateStr) ?? collect([]);
-                        $hasApprovedCheckInReq  = $dayReqs->contains('attendance_type', 'check_in');
-                        $hasApprovedCheckOutReq = $dayReqs->contains('attendance_type', 'check_out');
-
-                        // [TRANSFORMASI] Variabel ini tetap berfungsi karena objek/null akan dievaluasi sebagai true/false
-                        $isValidIn  = $checkInLog || $hasApprovedCheckInReq;
-                        $isValidOut = $checkOutLog || $hasApprovedCheckOutReq;
-
-                        if ((!$isValidIn || !$isValidOut) && !$currentObj->isToday()) {
-                            $totalPelanggaranLog++; 
-                        }
-
-                        if ($hasApprovedCheckInReq || $hasApprovedCheckOutReq) {
-                            $totalPengajuanDiACC++;
-                        }
                     }
 
-                    if ($att->status == \App\Models\Attendance::STATUS_LATE) {
-                        $totalTerlambat++;
-                    } elseif ($att->status == \App\Models\Attendance::STATUS_EARLY_OUT) {
-                        $totalPulangAwal++;
-                    } elseif ($att->status == \App\Models\Attendance::STATUS_LEAVE) {
-                        $totalCuti++;
-                    } elseif ($att->status == \App\Models\Attendance::STATUS_PRESENT) {
-                        $totalHadir++;
+                    // Pelanggaran Log (Lupa Absen)
+                    $checkInLog  = $att->logs->where('attendance_type', 'check_in')->first();
+                    $checkOutLog = $att->logs->where('attendance_type', 'check_out')->first();
+                    if ((!$checkInLog || !$checkOutLog) && !$currentObj->isToday()) {
+                        $totalPelanggaranLog++;
                     }
+
+                    // Status Lainnya
+                    if ($att->status == \App\Models\Attendance::STATUS_LATE) $totalTerlambat++;
+                    if ($att->status == \App\Models\Attendance::STATUS_EARLY_OUT) $totalPulangAwal++;
+                    if ($att->status == \App\Models\Attendance::STATUS_LEAVE) $totalCuti++;
+
+                    // Koreksi Manual
+                    $dayReqs = $userSubmissions->get($dateStr) ?? collect([]);
+                    if ($dayReqs->isNotEmpty()) $totalPengajuanDiACC++;
                 } else {
-                    if (!$isWeekend && !$isNatHoliday) {
+                    if (!$isWeekend && !$isNatHoliday && !$currentObj->isToday()) {
                         $totalAlpha++;
                     }
                 }
@@ -1283,6 +1278,7 @@ class AttendanceController extends ApiController
             $score = 100 - $deduction;
             if ($score < 0) $score = 0;
 
+            // 2. Definisi Perfect yang Lebih Akurat
             $isPerfectAttendance = (
                 $totalAlpha == 0 &&
                 $totalTerlambat == 0 &&
@@ -1292,24 +1288,24 @@ class AttendanceController extends ApiController
                 $totalHadir > 0
             );
 
-            if ($score > 0) {
+            if ($totalHadir > 0) {
                 $candidates[] = [
-                    'id'             => $user->id,
-                    'name'           => $user->name,
-                    'department'     => $user->employee?->department?->name ?? '-',
-                    'position'       => $user->employee?->position?->name ?? '-',
-                    'avatar'         => $user->employee?->avatar ? Storage::url($user->employee->avatar) : null,
-                    'metrics'        => [
-                        'hadir'           => $totalHadir,
-                        'terlambat'       => $totalTerlambat,
-                        'pulang_awal'     => $totalPulangAwal,
-                        'alpha'           => $totalAlpha,
-                        'lupa_absen'      => $totalPelanggaranLog,
-                        'koreksi_manual'  => $totalPengajuanDiACC,
-                        'total_menit_pagi' => $totalMenitRajin // [TRANSFORMASI] Masuk ke metrics
+                    'id' => $user->id,
+                    'name' => $user->name,
+                    'department' => $user->employee?->department?->name ?? '-',
+                    'position' => $user->employee?->position?->name ?? '-',
+                    'avatar' => $user->employee?->avatar ? Storage::url($user->employee->avatar) : null,
+                    'metrics' => [
+                        'hadir' => $totalHadir,
+                        'terlambat' => $totalTerlambat,
+                        'pulang_awal' => $totalPulangAwal,
+                        'alpha' => $totalAlpha,
+                        'lupa_absen' => $totalPelanggaranLog,
+                        'koreksi_manual' => $totalPengajuanDiACC,
+                        'total_menit_pagi' => $totalMenitRajin
                     ],
-                    'score'          => $score,
-                    'is_perfect'     => $isPerfectAttendance
+                    'score' => $score,
+                    'is_perfect' => $isPerfectAttendance
                 ];
             }
         }
